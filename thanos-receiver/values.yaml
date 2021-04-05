@@ -1,0 +1,4 @@
+objstoreConfig: {}
+ingress:
+  class:
+  waf:

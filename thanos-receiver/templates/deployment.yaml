@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+{{ include "labels" . | indent 4 }}
+  name: {{ include "fullname" . }}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+{{ include "labels" . | indent 6 }}
+  serviceName: {{ include "fullname" . }}
+  template:
+    metadata:
+      labels:
+{{ include "labels" . | indent 8 }}
+    spec:
+      affinity: {}
+      containers:
+        - args:
+            - receive
+            - --objstore.config=$(OBJSTORE_CONFIG)
+            - --tsdb.path=/var/thanos/receive
+            - --label=receive_replica="$(NAME)"
+            - --grpc-address=0.0.0.0:10901
+            - --http-address=0.0.0.0:10902
+            - --remote-write.address=0.0.0.0:19291
+            - --receive.local-endpoint=127.0.0.1:10901
+            - --tsdb.retention=15d
+            - --receive.hashrings-file=/var/lib/thanos-receive/hashrings.json
+            - --log.level=debug
+          env:
+            - name: NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OBJSTORE_CONFIG
+              valueFrom:
+                secretKeyRef:
+                  key: objstore.yml
+                  name: {{ include "fullname" . }}-objstore-secret
+          image: quay.io/thanos/thanos:v0.15.0
+          livenessProbe:
+            failureThreshold: 8
+            httpGet:
+              path: /-/healthy
+              port: 10902
+              scheme: HTTP
+            periodSeconds: 30
+          name: thanos-receive
+          ports:
+            - containerPort: 10901
+              name: grpc
+            - containerPort: 10902
+              name: http
+            - containerPort: 19291
+              name: remote-write
+          readinessProbe:
+            failureThreshold: 20
+            httpGet:
+              path: /-/ready
+              port: 10902
+              scheme: HTTP
+            periodSeconds: 5
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+            - mountPath: /var/thanos/receive
+              name: data
+              readOnly: false
+            - mountPath: /var/lib/thanos-receive
+              name: hashring-config
+      terminationGracePeriodSeconds: 900
+      volumes:
+        - emptyDir: {}
+          name: data
+        - configMap:
+            name: {{ include "fullname" . }}-hashring
+          name: hashring-config
